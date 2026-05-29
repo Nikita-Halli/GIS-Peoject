@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Medical GIS Disease Prediction System
 
 A comprehensive, professional medical geospatial platform for disease risk prediction and management with role-based dashboards, interactive mapping, and ML-powered analytics.
@@ -350,3 +351,7 @@ For issues, feature requests, or questions:
 ---
 
 **Built with ❤️ for public health**
+=======
+# GIS-Peoject
+gis software
+>>>>>>> 2b23b8e18bb8f019e3b00fb684d72ce3de0ed519
