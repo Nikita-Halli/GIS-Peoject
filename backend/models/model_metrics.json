@@ -1,0 +1,42 @@
+{
+  "regressor": {
+    "mae": 1.99,
+    "rmse": 2.8225,
+    "r2": 0.9939,
+    "cv_r2": 0.9947
+  },
+  "classifier": {
+    "accuracy": 0.8667,
+    "cv_accuracy": 0.9714
+  },
+  "feature_importances": {
+    "month": 0.0013,
+    "rainfall_mm": 0.1099,
+    "avg_temp_c": 0.0047,
+    "max_temp_c": 0.0013,
+    "min_temp_c": 0.0003,
+    "humidity_pct": 0.1309,
+    "rainy_days": 0.1083,
+    "stagnant_water_index": 0.3167,
+    "mosquito_density_index": 0.3208,
+    "prev_month_cases": 0.0058
+  },
+  "features": [
+    "month",
+    "rainfall_mm",
+    "avg_temp_c",
+    "max_temp_c",
+    "min_temp_c",
+    "humidity_pct",
+    "rainy_days",
+    "stagnant_water_index",
+    "mosquito_density_index",
+    "prev_month_cases"
+  ],
+  "risk_classes": [
+    "High",
+    "Low",
+    "Medium"
+  ],
+  "training_rows": 72
+}
