@@ -1,47 +1,51 @@
 """
-train_model.py
-Run once from the backend/ folder:
-    py -3.11 -m python train_model.py
+Dharwad Dengue Prediction Model — Final Version
+================================================
+Training data: 72 monthly records (2019-2024)
+  - 2019-2020: District-level estimates from KSNDMC climate data
+  - 2021-2024: Real patient counts from 592 admission records
+  + Climate: KSNDMC + UAS Dharwad MARS station
 
-Trains a regressor (case count) + classifier (risk level) on
-dharwad_dengue_climate_dataset.csv and saves 5 artefacts to backend/models/.
+This hybrid approach gives the model enough High-risk examples
+(2019-2020 outbreak months) to learn outbreak patterns,
+while incorporating real 2021-2024 patient data.
 """
 
 import json
-import os
-import sys
-from pathlib import Path
-
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.model_selection import cross_val_score
+from pathlib import Path
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score,
+    classification_report, accuracy_score
+)
 
-# ── Paths ──────────────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).resolve().parent          # backend/
-MODEL_DIR  = BASE_DIR / "models"
-CSV_PATH   = BASE_DIR.parent / "dharwad_dengue_climate_dataset.csv"
+BASE_DIR  = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR / "dharwad_dengue_climate_dataset.csv"
+if not DATA_PATH.exists():
+    DATA_PATH = BASE_DIR.parent / "dharwad_dengue_climate_dataset.csv"
 
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR = BASE_DIR / "models"
+MODEL_DIR.mkdir(exist_ok=True)
 
-print(f"Looking for dataset at: {CSV_PATH}")
-if not CSV_PATH.exists():
-    print("ERROR: dharwad_dengue_climate_dataset.csv not found.")
-    print("Make sure it is in the project root (next to backend/).")
-    sys.exit(1)
+print(f"Loading: {DATA_PATH}")
+df = pd.read_csv(DATA_PATH)
+print(f"Dataset: {len(df)} rows, {df['dengue_cases'].sum()} total cases")
 
-# ── Load data ──────────────────────────────────────────────────────────────
-df = pd.read_csv(CSV_PATH)
-print(f"Loaded {len(df)} rows, columns: {list(df.columns)}")
+print(f"\nYearly summary:")
+for yr, grp in df.groupby("year"):
+    src = "Real patient data" if yr >= 2021 else "KSNDMC estimates"
+    print(f"  {yr}: {grp['dengue_cases'].sum():4d} cases, "
+          f"peak={grp['dengue_cases'].max():4d} ({src})")
 
-# ── Normalise column names (lowercase + strip) ─────────────────────────────
-df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-print(f"Normalised columns: {list(df.columns)}")
+print(f"\nRisk distribution:")
+print(df["risk_level"].value_counts())
 
-# ── Feature columns (must match what prediction.py sends) ─────────────────
-FEATURE_COLS = [
+FEATURES = [
     "month",
     "rainfall_mm",
     "avg_temp_c",
@@ -54,97 +58,135 @@ FEATURE_COLS = [
     "prev_month_cases",
 ]
 
-TARGET_CASES = "dengue_cases"   # regression target
-TARGET_RISK  = "risk_level"     # classification target (Low/Medium/High)
-
-# ── Verify required columns exist ─────────────────────────────────────────
-missing = [c for c in FEATURE_COLS + [TARGET_CASES] if c not in df.columns]
-if missing:
-    print(f"ERROR: Missing columns in CSV: {missing}")
-    print(f"Available columns: {list(df.columns)}")
-    sys.exit(1)
-
-# ── Build risk_level if not present ───────────────────────────────────────
-if TARGET_RISK not in df.columns:
-    print("risk_level column not found — generating from dengue_cases ...")
-    def make_risk(cases):
-        if cases >= 70:   return "High"
-        if cases >= 25:   return "Medium"
-        return "Low"
-    df[TARGET_RISK] = df[TARGET_CASES].apply(make_risk)
-
-print("Risk distribution:\n", df[TARGET_RISK].value_counts())
-
-# ── Prepare X / y ─────────────────────────────────────────────────────────
-X = df[FEATURE_COLS].copy()
-
-# Fill any NaN with column median
-for col in X.columns:
-    if X[col].isnull().any():
-        X[col].fillna(X[col].median(), inplace=True)
-
-y_cases = df[TARGET_CASES].values.astype(float)
+X     = df[FEATURES].copy()
+y_reg = df["dengue_cases"].copy()
+y_cls = df["risk_level"].copy()
 
 le = LabelEncoder()
-y_risk = le.fit_transform(df[TARGET_RISK].values)
+le.fit(["Low", "Medium", "High"])
+y_cls_enc = le.transform(y_cls)
 
-print(f"\nFeature matrix shape : {X.shape}")
-print(f"Risk classes          : {le.classes_}")
+print(f"\nClasses: {le.classes_}")
+print(f"Case stats: min={y_reg.min()}, max={y_reg.max()}, "
+      f"mean={y_reg.mean():.1f}, median={y_reg.median():.1f}")
 
-# ── Train regressor ────────────────────────────────────────────────────────
-print("\nTraining regressor ...")
-reg = GradientBoostingRegressor(
+# Train/test split
+X_train, X_test, yr_train, yr_test = train_test_split(
+    X, y_reg, test_size=0.2, random_state=42
+)
+_, _, yc_train, yc_test = train_test_split(
+    X, y_cls_enc, test_size=0.2, random_state=42
+)
+
+print(f"\nTrain: {len(X_train)}, Test: {len(X_test)}")
+
+# Regressor
+print("\nTraining RandomForestRegressor...")
+reg = RandomForestRegressor(
     n_estimators=300,
-    max_depth=4,
-    learning_rate=0.05,
+    max_depth=10,
+    min_samples_split=3,
     min_samples_leaf=2,
+    max_features="sqrt",
     random_state=42,
+    n_jobs=-1
 )
-reg.fit(X, y_cases)
+reg.fit(X_train, yr_train)
+yr_pred = reg.predict(X_test)
 
-y_pred   = reg.predict(X)
-mae      = float(np.mean(np.abs(y_pred - y_cases)))
-rmse     = float(np.sqrt(np.mean((y_pred - y_cases) ** 2)))
-r2       = float(reg.score(X, y_cases))
-cv_r2    = float(np.mean(cross_val_score(reg, X, y_cases, cv=5, scoring="r2")))
+mae   = mean_absolute_error(yr_test, yr_pred)
+rmse  = np.sqrt(mean_squared_error(yr_test, yr_pred))
+r2    = r2_score(yr_test, yr_pred)
+cv_r2 = cross_val_score(reg, X, y_reg, cv=5, scoring="r2").mean()
 
-print(f"  R²={r2:.4f}  CV-R²={cv_r2:.4f}  MAE=±{mae:.2f}  RMSE={rmse:.2f}")
+print(f"\n=== Regressor ===")
+print(f"  MAE          : {mae:.2f} cases")
+print(f"  RMSE         : {rmse:.2f} cases")
+print(f"  R²           : {r2:.4f}")
+print(f"  CV R² 5-fold : {cv_r2:.4f}")
 
-# ── Train classifier ───────────────────────────────────────────────────────
-print("Training classifier ...")
-clf = GradientBoostingClassifier(
+print(f"\nPredictions vs Actual (test set):")
+for actual, predicted in zip(yr_test, yr_pred):
+    status = "✓" if abs(actual - round(predicted)) <= 10 else "~"
+    print(f"  {status} Actual: {int(actual):4d}  "
+          f"Predicted: {int(round(predicted)):4d}  "
+          f"Diff: {abs(actual - round(predicted)):.0f}")
+
+# Classifier
+print("\nTraining RandomForestClassifier...")
+clf = RandomForestClassifier(
     n_estimators=300,
-    max_depth=3,
-    learning_rate=0.05,
+    max_depth=10,
+    min_samples_split=3,
+    min_samples_leaf=2,
+    max_features="sqrt",
     random_state=42,
+    n_jobs=-1,
+    class_weight="balanced"
 )
-clf.fit(X, y_risk)
+clf.fit(X_train, yc_train)
+yc_pred = clf.predict(X_test)
 
-acc    = float(clf.score(X, y_risk))
-cv_acc = float(np.mean(cross_val_score(clf, X, y_risk, cv=5, scoring="accuracy")))
-print(f"  Accuracy={acc:.4f}  CV-Accuracy={cv_acc:.4f}")
+acc    = accuracy_score(yc_test, yc_pred)
+cv_acc = cross_val_score(clf, X, y_cls_enc, cv=5, scoring="accuracy").mean()
 
-# ── Feature importances ────────────────────────────────────────────────────
-importances = {
-    col: round(float(imp), 6)
-    for col, imp in zip(FEATURE_COLS, reg.feature_importances_)
-}
+print(f"\n=== Classifier ===")
+print(f"  Accuracy         : {acc:.4f}")
+print(f"  CV Accuracy 5-fold: {cv_acc:.4f}")
+print(classification_report(
+    yc_test, yc_pred,
+    target_names=le.classes_,
+    zero_division=0
+))
 
-# ── Save artefacts ─────────────────────────────────────────────────────────
-joblib.dump(reg,          MODEL_DIR / "dengue_regressor.pkl")
-joblib.dump(clf,          MODEL_DIR / "dengue_classifier.pkl")
-joblib.dump(FEATURE_COLS, MODEL_DIR / "feature_columns.pkl")
-joblib.dump(le,           MODEL_DIR / "label_encoder.pkl")
+importances = dict(zip(FEATURES, reg.feature_importances_.tolist()))
+print("Feature Importances:")
+for k, v in sorted(importances.items(), key=lambda x: -x[1]):
+    bar = "█" * int(v * 50)
+    print(f"  {k:30s}: {v:.4f}  {bar}")
+
+# Save
+joblib.dump(reg,      MODEL_DIR / "dengue_regressor.pkl")
+joblib.dump(clf,      MODEL_DIR / "dengue_classifier.pkl")
+joblib.dump(FEATURES, MODEL_DIR / "feature_columns.pkl")
+joblib.dump(le,       MODEL_DIR / "label_encoder.pkl")
 
 metrics = {
-    "regressor":  {"mae": round(mae,2), "rmse": round(rmse,2), "r2": round(r2,4), "cv_r2": round(cv_r2,4)},
-    "classifier": {"accuracy": round(acc,4), "cv_accuracy": round(cv_acc,4)},
-    "feature_importances": importances,
-    "training_rows": len(df),
-    "risk_classes": list(le.classes_),
+    "regressor": {
+        "mae":   round(float(mae),  2),
+        "rmse":  round(float(rmse), 2),
+        "r2":    round(float(r2),   4),
+        "cv_r2": round(float(cv_r2),4),
+    },
+    "classifier": {
+        "accuracy":    round(float(acc),    4),
+        "cv_accuracy": round(float(cv_acc), 4),
+    },
+    "feature_importances": {
+        k: round(float(v), 4) for k, v in importances.items()
+    },
+    "features":       FEATURES,
+    "risk_classes":   le.classes_.tolist(),
+    "training_rows":  len(df),
+    "total_patients": 592,
+    "data_years":     "2019-2024",
+    "data_source": (
+        "Hybrid dataset: KSNDMC district estimates (2019-2020) + "
+        "real patient admission records (2021-2024) + "
+        "UAS Dharwad MARS station climate data"
+    ),
 }
+
 with open(MODEL_DIR / "model_metrics.json", "w") as f:
     json.dump(metrics, f, indent=2)
 
-print(f"\nAll 5 artefacts saved to {MODEL_DIR}")
-print("Training complete!")
+print(f"\n✅ Models saved!")
+print(f"\n📊 Final Summary:")
+print(f"   Training rows  : {len(df)}")
+print(f"   Real patients  : 592 (2021-2024)")
+print(f"   Estimate rows  : 24 (2019-2020, KSNDMC)")
+print(f"   R²             : {r2:.4f}")
+print(f"   CV R² (5-fold) : {cv_r2:.4f}")
+print(f"   MAE            : ±{mae:.2f} cases")
+print(f"   Classifier Acc : {acc:.4f}")
+print(f"   CV Accuracy    : {cv_acc:.4f}")

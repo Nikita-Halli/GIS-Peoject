@@ -1,25 +1,25 @@
 {
   "regressor": {
-    "mae": 1.99,
-    "rmse": 2.8225,
-    "r2": 0.9939,
-    "cv_r2": 0.9947
+    "mae": 10.32,
+    "rmse": 13.27,
+    "r2": 0.8081,
+    "cv_r2": -3.7956
   },
   "classifier": {
-    "accuracy": 0.8667,
-    "cv_accuracy": 0.9714
+    "accuracy": 0.8,
+    "cv_accuracy": 0.8162
   },
   "feature_importances": {
-    "month": 0.0013,
-    "rainfall_mm": 0.1099,
-    "avg_temp_c": 0.0047,
-    "max_temp_c": 0.0013,
-    "min_temp_c": 0.0003,
-    "humidity_pct": 0.1309,
-    "rainy_days": 0.1083,
-    "stagnant_water_index": 0.3167,
-    "mosquito_density_index": 0.3208,
-    "prev_month_cases": 0.0058
+    "month": 0.0073,
+    "rainfall_mm": 0.1056,
+    "avg_temp_c": 0.0198,
+    "max_temp_c": 0.032,
+    "min_temp_c": 0.0153,
+    "humidity_pct": 0.0637,
+    "rainy_days": 0.1063,
+    "stagnant_water_index": 0.127,
+    "mosquito_density_index": 0.1836,
+    "prev_month_cases": 0.3394
   },
   "features": [
     "month",
@@ -38,5 +38,8 @@
     "Low",
     "Medium"
   ],
-  "training_rows": 72
+  "training_rows": 72,
+  "total_patients": 592,
+  "data_years": "2019-2024",
+  "data_source": "Hybrid dataset: KSNDMC district estimates (2019-2020) + real patient admission records (2021-2024) + UAS Dharwad MARS station climate data"
 }
